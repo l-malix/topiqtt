@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="fr" data-theme="auto">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TopiQTT</title>
+  <!--TOPIQTT_STYLE-->
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Unified Toolbar -->
+    <header class="toolbar">
+      <div class="toolbar-group">
+        <span class="brand-mark" translate="no">
+          <span class="brand-icon" aria-hidden="true">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4">
+              <circle cx="6" cy="12" r="2.5"></circle>
+              <circle cx="18" cy="6" r="2.5"></circle>
+              <circle cx="18" cy="18" r="2.5"></circle>
+              <path d="M8.5 11L15.5 7M8.5 13L15.5 17"></path>
+            </svg>
+          </span>
+          TopiQTT
+        </span>
+
+        <button id="btn-open-connections" type="button" class="btn" aria-label="Gérer les connexions aux serveurs MQTT">
+          <span id="broker-dot" class="dot dot-warning" aria-hidden="true"></span>
+          <span id="broker-label">Choisir un serveur</span>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="m6 9 6 6 6-6"></path>
+          </svg>
+        </button>
+
+        <div class="segmented" role="group" aria-label="Navigation principale">
+          <button id="nav-explorer" type="button" class="segmented-btn active" aria-pressed="true">Explorateur</button>
+          <button id="nav-dashboards" type="button" class="segmented-btn" aria-pressed="false">
+            Dashboards <span id="nav-dash-count" class="tabular">(1)</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="search-wrap">
+        <label for="global-search" class="sr-only">Filtrer les topics ou valeurs</label>
+        <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="11" cy="11" r="8"></circle>
+          <path d="m21 21-4.3-4.3"></path>
+        </svg>
+        <input id="global-search" class="search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Filtrer par topic, mot-clé ou valeur…" />
+        <kbd class="kbd-hint">Ctrl+K</kbd>
+      </div>
+
+      <div class="toolbar-group">
+        <button id="btn-toggle-stream" type="button" class="btn" aria-pressed="true">
+          <span id="stream-btn-text">Pause</span>
+        </button>
+
+        <div class="segmented" role="group" aria-label="Apparence">
+          <button type="button" data-theme-choice="auto" class="segmented-btn active-soft theme-btn" aria-pressed="true">Auto</button>
+          <button type="button" data-theme-choice="light" class="segmented-btn theme-btn" aria-pressed="false">Clair</button>
+          <button type="button" data-theme-choice="dark" class="segmented-btn theme-btn" aria-pressed="false">Sombre</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- View 1: Explorer -->
+    <div id="workspace-grid" class="workspace">
+      <aside class="sidebar">
+        <div class="pinned-wrap">
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <h2 class="section-title">Épinglés</h2>
+            <span id="pinned-count" class="tabular" style="font-size:12px;color:var(--muted-foreground);">0</span>
+          </div>
+          <div id="pinned-list" class="pinned-list"></div>
+        </div>
+
+        <div class="section-bar">
+          <h2 class="section-title">Arborescence des topics</h2>
+          <button id="btn-expand-toggle" type="button" style="color:var(--link);font-size:12px;">Tout replier</button>
+        </div>
+
+        <nav aria-label="Arborescence hiérarchique des topics MQTT" class="tree-scroll">
+          <div id="topic-tree" role="tree"></div>
+          <div id="tree-empty" class="hidden" style="padding:36px 12px;text-align:center;">
+            <p style="color:var(--muted-foreground);margin:0 0 10px;">Aucun topic ne correspond à votre filtre.</p>
+            <button id="btn-clear-search" type="button" class="btn btn-sm">Effacer le filtre</button>
+          </div>
+        </nav>
+      </aside>
+
+      <div id="sidebar-resizer" class="resizer-v" role="separator" aria-orientation="vertical" aria-label="Redimensionner l'arborescence" aria-valuemin="240" aria-valuemax="560" aria-valuenow="340" tabindex="0"></div>
+
+      <main id="main-panel" class="main-panel">
+        <div class="inspector-header">
+          <div style="min-width:0;flex:1;">
+            <div id="breadcrumb-bar" class="breadcrumbs mono" translate="no"></div>
+            <div class="meta-row">
+              <span id="detail-kind-badge" class="pill">Topic</span>
+              <span id="detail-retained-badge" class="pill pill-bordered hidden">Mémorisé (Retain)</span>
+              <span id="detail-live-age" class="tabular">En attente</span>
+              <span aria-hidden="true">•</span>
+              <span id="detail-msg-count" class="tabular">0 messages</span>
+            </div>
+          </div>
+
+          <div class="toolbar-group">
+            <button id="btn-copy-topic" type="button" class="btn btn-sm">
+              <span id="copy-topic-label">Copier le chemin</span>
+            </button>
+            <button id="btn-toggle-pin" type="button" class="btn btn-sm" aria-pressed="false">
+              <span id="pin-btn-label">Épingler</span>
+            </button>
+            <button id="btn-delete-retained" type="button" class="btn btn-sm btn-danger">
+              <span id="delete-btn-label">Effacer</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="leaf-tabs-bar" class="tabs-bar" role="tablist" aria-label="Modes d'inspection">
+          <button type="button" role="tab" data-tab="readable" aria-selected="true" class="tab-btn active">Vue lisible</button>
+          <button type="button" role="tab" data-tab="json" aria-selected="false" class="tab-btn">JSON / Brut</button>
+          <button type="button" role="tab" data-tab="diff" aria-selected="false" class="tab-btn">Comparaison</button>
+          <button type="button" role="tab" data-tab="chart" aria-selected="false" class="tab-btn">Graphique &amp; Historique</button>
+        </div>
+
+        <div id="inspector-scroll" class="inspector-scroll">
+          <!-- Branch View -->
+          <section id="panel-branch" class="hidden">
+            <p id="branch-summary-text" style="margin:0 0 10px;color:var(--muted-foreground);font-size:12px;"></p>
+            <div class="card">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Topic</th>
+                    <th>Dernière valeur</th>
+                    <th style="text-align:right;">Messages</th>
+                    <th style="text-align:right;">Reçu</th>
+                  </tr>
+                </thead>
+                <tbody id="branch-tbody"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <!-- Tab 1: Vue lisible -->
+          <section id="panel-readable" role="tabpanel">
+            <div id="readable-container" class="card"></div>
+          </section>
+
+          <!-- Tab 2: JSON / Brut -->
+          <section id="panel-json" role="tabpanel" class="hidden">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+              <span id="json-format-label" style="color:var(--muted-foreground);font-size:12px;">Payload brut</span>
+              <button id="btn-copy-payload" type="button" class="btn btn-sm">Copier le contenu</button>
+            </div>
+            <div class="card">
+              <pre id="json-pre" class="code-block mono" translate="no"></pre>
+            </div>
+          </section>
+
+          <!-- Tab 3: Comparaison -->
+          <section id="panel-diff" role="tabpanel" class="hidden">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+              <span style="color:var(--muted-foreground);font-size:12px;">Différences entre l'avant-dernier message et le dernier reçu</span>
+              <div style="display:flex;gap:12px;font-size:12px;">
+                <span style="color:var(--error);">Ancien</span>
+                <span style="color:var(--success);">Nouveau</span>
+              </div>
+            </div>
+            <div id="diff-container" class="card"></div>
+          </section>
+
+          <!-- Tab 4: Graphique & Historique -->
+          <section id="panel-chart" role="tabpanel" class="hidden" style="display:flex;flex-direction:column;gap:14px;">
+            <div class="card card-padded">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+                <div>
+                  <h3 id="chart-title" style="margin:0;font-size:12px;font-weight:600;">Évolution des valeurs reçues</h3>
+                  <p style="margin:2px 0 0;font-size:12px;color:var(--muted-foreground);">Valeurs numériques extraites du topic</p>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;">
+                  <span id="chart-latest-val" class="tabular" style="font-size:14px;font-weight:600;color:var(--primary);">0</span>
+                  <button id="btn-pin-to-dashboard" type="button" class="btn btn-sm">+ Ajouter à un dashboard</button>
+                </div>
+              </div>
+              <div style="width:100%;height:190px;position:relative;">
+                <canvas id="topic-chart" style="width:100%;height:100%;display:block;"></canvas>
+                <div id="chart-empty" class="hidden" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted-foreground);font-size:12px;text-align:center;">
+                  Ce topic ne contient pas de valeur numérique traçable pour le moment.
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header-bar">
+                <strong style="color:var(--foreground);">Historique récent</strong>
+              </div>
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Heure</th>
+                    <th>Contenu</th>
+                    <th style="text-align:right;">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="history-tbody"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <!-- Horizontal Resizer between Inspector and Publish Drawer -->
+        <div id="publish-resizer" class="resizer-h" role="separator" aria-orientation="horizontal" aria-label="Ajuster la hauteur du panneau de message" aria-valuemin="150" aria-valuemax="460" aria-valuenow="230" tabindex="0" title="Glisser pour ajuster la hauteur">
+          <span class="resizer-grip" aria-hidden="true"></span>
+        </div>
+
+        <!-- Publish Drawer -->
+        <div id="publish-drawer" class="publish-drawer">
+          <button id="btn-toggle-publish" type="button" class="publish-toggle-bar" aria-expanded="false">
+            <span style="display:flex;align-items:center;gap:8px;min-width:0;">
+              <span style="color:var(--primary);font-weight:600;">Publier</span>
+              <code id="publish-target-label" class="mono" style="color:var(--muted-foreground);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" translate="no">orders/eu/created</code>
+            </span>
+            <span id="publish-chevron" style="color:var(--muted-foreground);">Ouvrir</span>
+          </button>
+
+          <form id="publish-form" class="publish-form hidden">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <label for="pub-topic-input" style="color:var(--muted-foreground);font-size:12px;">Topic :</label>
+              <input id="pub-topic-input" type="text" class="input mono" style="flex:1;" autocomplete="off" spellcheck="false" placeholder="ex : orders/eu/created…" />
+            </div>
+
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
+              <div class="segmented" role="group" aria-label="Format du payload">
+                <button type="button" data-pub-mode="json" class="segmented-btn active pub-mode-btn" aria-pressed="true">JSON</button>
+                <button type="button" data-pub-mode="text" class="segmented-btn pub-mode-btn" aria-pressed="false">Texte brut</button>
+              </div>
+              <button id="btn-toggle-pub-adv" type="button" aria-expanded="false" style="color:var(--muted-foreground);font-size:12px;text-decoration:underline;">
+                Options techniques (QoS et Retain)
+              </button>
+            </div>
+
+            <div id="pub-adv-options" class="hidden" style="display:flex;align-items:center;gap:16px;padding:8px 10px;border-radius:8px;background:var(--content);border:1px solid var(--border);flex-wrap:wrap;">
+              <label style="display:flex;align-items:center;gap:6px;">
+                <span style="color:var(--muted-foreground);">QoS</span>
+                <select id="pub-qos" class="select">
+                  <option value="0">0 (Au plus une fois)</option>
+                  <option value="1" selected>1 (Au moins une fois)</option>
+                  <option value="2">2 (Exactement une fois)</option>
+                </select>
+              </label>
+              <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+                <input id="pub-retain" type="checkbox" />
+                <span>Mémoriser le message (Retain)</span>
+              </label>
+            </div>
+
+            <div class="pub-row-editor">
+              <label for="pub-payload" class="sr-only">Payload à publier</label>
+              <textarea id="pub-payload" class="textarea mono" spellcheck="false" placeholder='{"status": "ok"}'></textarea>
+              <button type="submit" class="btn btn-primary" style="padding:8px 16px;">Publier</button>
+            </div>
+            <p id="pub-error" class="hidden" style="margin:0;color:var(--error);font-size:12px;" role="alert"></p>
+          </form>
+        </div>
+      </main>
+    </div>
+
+    <!-- View 2: Dashboards & Multi-Curve Builder -->
+    <div id="dashboards-view" class="dashboards-view hidden">
+      <aside class="dash-sidebar">
+        <div class="section-bar">
+          <h2 class="section-title">Mes dashboards</h2>
+          <button id="btn-new-dashboard" type="button" class="btn btn-primary btn-sm">+ Nouveau</button>
+        </div>
+        <div id="dashboards-list" class="dash-list"></div>
+      </aside>
+
+      <section class="dash-main">
+        <div class="inspector-header" style="align-items:center;">
+          <div style="min-width:0;">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <h1 id="dash-active-title" style="margin:0;font-size:14px;font-weight:600;">Dashboard</h1>
+            </div>
+            <p id="dash-active-subtitle" style="margin:2px 0 0;font-size:12px;color:var(--muted-foreground);">0 graphique</p>
+          </div>
+          <div class="toolbar-group">
+            <button id="btn-rename-dashboard" type="button" class="btn btn-sm">Renommer</button>
+            <button id="btn-delete-dashboard" type="button" class="btn btn-sm btn-danger">Supprimer</button>
+            <button id="btn-add-chart" type="button" class="btn btn-primary btn-sm">+ Ajouter un graphique</button>
+          </div>
+        </div>
+
+        <div class="inspector-scroll">
+          <div id="dash-charts-grid" class="dash-grid"></div>
+          <div id="dash-empty-state" class="card hidden" style="padding:44px 16px;text-align:center;border-style:dashed;">
+            <p style="margin:0 0 6px;font-weight:600;">Ce dashboard ne contient aucun graphique.</p>
+            <p style="margin:0 0 14px;color:var(--muted-foreground);font-size:12px;">Créez un graphique pour superposer une ou plusieurs courbes MQTT en direct.</p>
+            <button id="btn-empty-add-chart" type="button" class="btn btn-primary">+ Créer un premier graphique</button>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <div class="footer-left tabular">
+        <span style="display:inline-flex;align-items:center;gap:6px;color:var(--foreground);font-weight:500;">
+          <span id="footer-dot" class="dot dot-success" aria-hidden="true"></span>
+          <span id="footer-status">Connecté</span>
+        </span>
+        <span aria-hidden="true">•</span>
+        <span id="footer-topic-count">0 topics</span>
+        <span aria-hidden="true">•</span>
+        <span id="footer-msg-total">0 messages reçus</span>
+        <span aria-hidden="true">•</span>
+        <span id="footer-rate">Flux en direct</span>
+      </div>
+      <div>
+        <span>TopiQTT v0.1.0 · Ctrl+K Filtrer · Échap Fermer</span>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast hidden" role="status" aria-live="polite">
+    <span class="dot dot-success" aria-hidden="true"></span>
+    <span id="toast-msg"></span>
+  </div>
+
+  <!-- Connections Modal -->
+  <div id="connections-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="conn-modal-title">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div>
+          <h2 id="conn-modal-title" style="margin:0;font-size:14px;font-weight:600;">Connexions aux serveurs MQTT</h2>
+          <p style="margin:2px 0 0;font-size:12px;color:var(--muted-foreground);">Choisissez un serveur, testez la connexion ou créez un nouveau profil</p>
+        </div>
+        <button id="btn-close-conn" type="button" class="btn btn-ghost btn-sm" aria-label="Fermer">Fermer</button>
+      </div>
+
+      <div class="modal-body-split">
+        <div style="padding:12px;border-right:1px solid var(--border);background:color-mix(in srgb,var(--sidebar) 65%,transparent);display:flex;flex-direction:column;gap:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <span class="section-title">Profils</span>
+            <button id="btn-new-profile" type="button" class="btn btn-sm">+ Nouveau</button>
+          </div>
+          <div id="broker-profiles-list" style="display:flex;flex-direction:column;gap:4px;"></div>
+        </div>
+
+        <form id="conn-form" style="padding:16px;display:flex;flex-direction:column;gap:12px;">
+          <div class="form-grid-2">
+            <div>
+              <label for="conn-name" class="field-label">Nom affiché</label>
+              <input id="conn-name" type="text" class="input" style="width:100%;" autocomplete="off" placeholder="Ex : Mosquitto Local…" />
+            </div>
+            <div>
+              <label for="conn-proto" class="field-label">Protocole</label>
+              <select id="conn-proto" class="select" style="width:100%;">
+                <option value="mqtt">Standard (mqtt://)</option>
+                <option value="mqtts">Chiffré TLS (mqtts://)</option>
+                <option value="ws">WebSocket (ws://)</option>
+                <option value="wss">WebSocket TLS (wss://)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-grid-2">
+            <div>
+              <label for="conn-host" class="field-label">Adresse du serveur (Host)</label>
+              <input id="conn-host" type="text" class="input mono" style="width:100%;" autocomplete="off" spellcheck="false" placeholder="localhost ou broker.emqx.io…" />
+            </div>
+            <div>
+              <label for="conn-port" class="field-label">Port</label>
+              <input id="conn-port" type="number" class="input tabular" style="width:100%;" inputmode="numeric" placeholder="1883" />
+            </div>
+          </div>
+
+          <div class="form-grid-2">
+            <div>
+              <label for="conn-user" class="field-label">Identifiant <span style="color:var(--muted-foreground);font-weight:400;">(optionnel)</span></label>
+              <input id="conn-user" type="text" class="input" style="width:100%;" autocomplete="off" spellcheck="false" />
+            </div>
+            <div>
+              <label for="conn-pass" class="field-label">Mot de passe <span style="color:var(--muted-foreground);font-weight:400;">(optionnel)</span></label>
+              <input id="conn-pass" type="password" class="input" style="width:100%;" autocomplete="off" />
+            </div>
+          </div>
+
+          <div id="conn-tls-card" class="card">
+            <button id="btn-conn-tls" type="button" aria-expanded="false" style="width:100%;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;background:var(--content);font-weight:500;">
+              <span>Certificats TLS / mTLS <span id="conn-tls-badge" style="color:var(--muted-foreground);font-weight:400;">(optionnel · mqtts / wss)</span></span>
+              <span id="conn-tls-chevron" style="color:var(--muted-foreground);">Afficher</span>
+            </button>
+            <div id="conn-tls-body" class="hidden" style="padding:12px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:10px;">
+              <div>
+                <label for="conn-ca-cert" class="field-label">Certificat CA <span style="color:var(--muted-foreground);font-weight:400;">(.pem / .crt · vide = magasin système)</span></label>
+                <div style="display:flex;gap:6px;align-items:center;">
+                  <input id="conn-ca-cert" type="text" class="input mono" style="flex:1;min-width:0;" autocomplete="off" spellcheck="false" placeholder="Ex : C:\certs\ca.crt…" />
+                  <button type="button" data-pick-cert="ca" class="btn btn-sm">Parcourir…</button>
+                  <button type="button" data-clear-cert="conn-ca-cert" class="btn btn-ghost btn-sm" aria-label="Effacer le certificat CA">Effacer</button>
+                </div>
+              </div>
+              <div class="form-grid-2">
+                <div>
+                  <label for="conn-client-cert" class="field-label">Certificat client mTLS <span style="color:var(--muted-foreground);font-weight:400;">(.pem / .crt)</span></label>
+                  <div style="display:flex;gap:6px;align-items:center;">
+                    <input id="conn-client-cert" type="text" class="input mono" style="flex:1;min-width:0;" autocomplete="off" spellcheck="false" placeholder="Chemin client.crt…" />
+                    <button type="button" data-pick-cert="clientCert" class="btn btn-sm">Parcourir…</button>
+                    <button type="button" data-clear-cert="conn-client-cert" class="btn btn-ghost btn-sm" aria-label="Effacer le certificat client">Effacer</button>
+                  </div>
+                </div>
+                <div>
+                  <label for="conn-client-key" class="field-label">Clé privée client <span style="color:var(--muted-foreground);font-weight:400;">(.pem / .key)</span></label>
+                  <div style="display:flex;gap:6px;align-items:center;">
+                    <input id="conn-client-key" type="text" class="input mono" style="flex:1;min-width:0;" autocomplete="off" spellcheck="false" placeholder="Chemin client.key…" />
+                    <button type="button" data-pick-cert="clientKey" class="btn btn-sm">Parcourir…</button>
+                    <button type="button" data-clear-cert="conn-client-key" class="btn btn-ghost btn-sm" aria-label="Effacer la clé privée client">Effacer</button>
+                  </div>
+                </div>
+              </div>
+              <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+                <input id="conn-skip-tls" type="checkbox" />
+                <span>Accepter les certificats TLS auto-signés (ignorer la vérification stricte)</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="card">
+            <button id="btn-conn-adv" type="button" aria-expanded="false" style="width:100%;padding:8px 12px;display:flex;align-items:center;justify-content:space-between;background:var(--content);font-weight:500;">
+              <span>Paramètres avancés (Souscription, Client ID)</span>
+              <span id="conn-adv-chevron" style="color:var(--muted-foreground);">Afficher</span>
+            </button>
+            <div id="conn-adv-body" class="hidden" style="padding:12px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:10px;">
+              <div class="form-grid-2">
+                <div>
+                  <label for="conn-sub" class="field-label">Filtre initial (Souscription)</label>
+                  <input id="conn-sub" type="text" class="input mono" style="width:100%;" value="#" spellcheck="false" />
+                </div>
+                <div>
+                  <label for="conn-client-id" class="field-label">Client ID <span style="color:var(--muted-foreground);font-weight:400;">(auto si vide)</span></label>
+                  <input id="conn-client-id" type="text" class="input mono" style="width:100%;" spellcheck="false" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="conn-test-feedback" class="feedback-box hidden" role="status" aria-live="polite"></div>
+
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:10px;border-top:1px solid var(--border);flex-wrap:wrap;">
+            <div style="display:flex;gap:8px;">
+              <button id="btn-test-conn" type="button" class="btn">Tester la connexion</button>
+              <button id="btn-delete-profile" type="button" class="btn btn-danger">Supprimer ce profil</button>
+            </div>
+            <div style="display:flex;gap:8px;">
+              <button id="btn-cancel-conn" type="button" class="btn btn-ghost">Annuler</button>
+              <button id="btn-submit-conn" type="submit" class="btn btn-primary">Se connecter</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chart Builder Modal -->
+  <div id="chart-builder-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="cb-modal-title">
+    <div class="modal-box">
+      <div class="modal-header">
+        <div>
+          <h2 id="cb-modal-title" style="margin:0;font-size:14px;font-weight:600;">Configurer un graphique multi-courbes</h2>
+          <p style="margin:2px 0 0;font-size:12px;color:var(--muted-foreground);">Superposez un ou plusieurs topics numériques sur le même graphique</p>
+        </div>
+        <button id="btn-close-cb" type="button" class="btn btn-ghost btn-sm" aria-label="Fermer">Fermer</button>
+      </div>
+
+      <form id="cb-form" style="padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:14px;">
+        <div class="form-grid-2">
+          <div>
+            <label for="cb-title" class="field-label">Titre du graphique</label>
+            <input id="cb-title" type="text" class="input" style="width:100%;" autocomplete="off" placeholder="Ex : Latence API vs File d'attente…" />
+          </div>
+          <div id="cb-target-dash-wrap">
+            <label for="cb-target-dash" class="field-label">Dashboard cible</label>
+            <select id="cb-target-dash" class="select" style="width:100%;"></select>
+          </div>
+        </div>
+
+        <div class="form-grid-3">
+          <div>
+            <label for="cb-span" class="field-label">Largeur</label>
+            <select id="cb-span" class="select" style="width:100%;">
+              <option value="1">Demi-largeur (1 colonne)</option>
+              <option value="2">Pleine largeur (2 colonnes)</option>
+            </select>
+          </div>
+          <div>
+            <label for="cb-height" class="field-label">Hauteur</label>
+            <select id="cb-height" class="select" style="width:100%;">
+              <option value="180">Compacte (180 px)</option>
+              <option value="240" selected>Standard (240 px)</option>
+              <option value="320">Grande (320 px)</option>
+            </select>
+          </div>
+          <div>
+            <label for="cb-scale" class="field-label">Échelle verticale</label>
+            <select id="cb-scale" class="select" style="width:100%;">
+              <option value="raw">Valeurs réelles</option>
+              <option value="normalized">Normalisée (0 à 100 %)</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <strong style="font-size:12px;">Courbes affichées</strong>
+            <button id="btn-add-series-row" type="button" class="btn btn-sm">+ Ajouter une courbe</button>
+          </div>
+          <div id="cb-series-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+          <p id="cb-error" class="hidden" style="margin:0;color:var(--error);font-size:12px;" role="alert"></p>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;gap:8px;padding-top:10px;border-top:1px solid var(--border);">
+          <button id="btn-cancel-cb" type="button" class="btn btn-ghost">Annuler</button>
+          <button type="submit" class="btn btn-primary">Enregistrer le graphique</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Create / Rename Dashboard Modal -->
+  <div id="new-dashboard-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="nd-modal-title">
+    <form id="nd-form" class="modal-box sm" style="padding:16px;gap:12px;">
+      <h2 id="nd-modal-title" style="margin:0;font-size:14px;font-weight:600;">Nouveau dashboard</h2>
+      <div>
+        <label for="nd-name" class="field-label">Nom du dashboard</label>
+        <input id="nd-name" type="text" class="input" style="width:100%;" autocomplete="off" placeholder="Ex : Suivi latence et files…" />
+        <p id="nd-error" class="hidden" style="margin:6px 0 0;color:var(--error);font-size:12px;" role="alert"></p>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;">
+        <button id="btn-cancel-nd" type="button" class="btn btn-ghost">Annuler</button>
+        <button type="submit" class="btn btn-primary">Valider</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Confirm Modal -->
+  <div id="confirm-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div class="modal-box sm" style="padding:16px;gap:12px;">
+      <h2 id="confirm-title" style="margin:0;font-size:14px;font-weight:600;">Confirmer</h2>
+      <p id="confirm-desc" style="margin:0;font-size:12px;color:var(--muted-foreground);line-height:1.5;"></p>
+      <div style="display:flex;justify-content:flex-end;gap:8px;">
+        <button id="btn-cancel-delete" type="button" class="btn">Annuler</button>
+        <button id="btn-confirm-delete" type="button" class="btn btn-danger-solid">Oui, confirmer</button>
+      </div>
+    </div>
+  </div>
+
+  <!--TOPIQTT_SCRIPT-->
+</body>
+</html>

@@ -1,0 +1,14 @@
+*.exe
+*.exe~
+*.syso
+*.log
+dist/
+unsigned/
+signed/
+release/
+.DS_Store
+cmd/
+docker-compose.yml
+mosquitto/
+.agents/
+skills-lock.json

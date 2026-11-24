@@ -1,0 +1,152 @@
+name: Release and Sign (SignPath)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag de release (ex: v0.1.0)"
+        required: true
+        default: "v0.1.0"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Resolve version tag
+        id: meta
+        shell: pwsh
+        run: |
+          $tag = if ("${{ github.event_name }}" -eq "workflow_dispatch") { "${{ github.event.inputs.tag }}" } else { "${{ github.ref_name }}" }
+          $ver = $tag.TrimStart('v')
+          if ($ver -notmatch '^\d+\.\d+\.\d+$') { $ver = "0.1.0" }
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "ver=$ver" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Run unit tests
+        run: go test -count=1 -v ./...
+
+      - name: Generate Windows resources (icon, DPI manifest, version)
+        run: |
+          go run github.com/tc-hib/go-winres@v0.3.3 make --arch amd64 `
+            --product-version "${{ steps.meta.outputs.ver }}" `
+            --file-version "${{ steps.meta.outputs.ver }}.0"
+
+      - name: Build TopiQTT.exe
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          New-Item -ItemType Directory -Force -Path unsigned | Out-Null
+          go build -ldflags="-H windowsgui -s -w -X main.appVersion=${{ steps.meta.outputs.ver }}" -o unsigned/TopiQTT.exe .
+
+      - name: Upload build artifact for SignPath
+        id: upload-unsigned
+        uses: actions/upload-artifact@v7
+        with:
+          name: unsigned-topiqtt
+          path: unsigned/TopiQTT.exe
+          retention-days: 1
+
+      - name: Check SignPath configuration
+        id: signpath_cfg
+        shell: pwsh
+        env:
+          SIGNPATH_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+        run: |
+          $enabled = ($env:SIGNPATH_TOKEN -ne "") -and ("${{ vars.SIGNPATH_ORG_ID }}" -ne "")
+          "enabled=$($enabled.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Submit signing request to SignPath Foundation
+        id: signpath
+        if: ${{ steps.signpath_cfg.outputs.enabled == 'true' }}
+        uses: signpath/github-action-submit-signing-request@v3.2
+        with:
+          api-token: "${{ secrets.SIGNPATH_API_TOKEN }}"
+          organization-id: "${{ vars.SIGNPATH_ORG_ID }}"
+          project-slug: "${{ vars.SIGNPATH_PROJECT_SLUG || 'topiqtt' }}"
+          signing-policy-slug: "${{ vars.SIGNPATH_POLICY_SLUG || 'release-signing' }}"
+          github-artifact-id: "${{ steps.upload-unsigned.outputs.artifact-id }}"
+          wait-for-completion: true
+          output-artifact-directory: "./signed"
+
+      - name: Prepare unsigned release binary (pending SignPath setup)
+        if: ${{ steps.signpath_cfg.outputs.enabled != 'true' }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path signed, release | Out-Null
+          Copy-Item "unsigned/TopiQTT.exe" "signed/TopiQTT.exe" -Force
+          @(
+            "## TopiQTT ${{ steps.meta.outputs.tag }} (Windows x64)",
+            "",
+            "Application portable autonome sans installateur. Téléchargez ``TopiQTT.exe`` ou l'archive ``TopiQTT-${{ steps.meta.outputs.tag }}-windows-x64.zip`` ci-dessous.",
+            "",
+            "> **Note Windows SmartScreen :** cette build initiale n'est pas encore signée (demande de signature open-source en cours auprès de [SignPath Foundation](https://signpath.org/)). Si Windows affiche *« Windows a protégé votre ordinateur »*, cliquez sur **Informations complémentaires → Exécuter quand même**.",
+            "",
+            "Free code signing program integration via [SignPath.io](https://signpath.io/) / [SignPath Foundation](https://signpath.org/)."
+          ) | Set-Content "release/release-notes.md" -Encoding UTF8
+
+      - name: Prepare signed release notes
+        if: ${{ steps.signpath_cfg.outputs.enabled == 'true' }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          @(
+            "## TopiQTT ${{ steps.meta.outputs.tag }} (Windows x64)",
+            "",
+            "Application portable autonome sans installateur.",
+            "",
+            "Free code signing provided by [SignPath.io](https://signpath.io/), using a certificate by [SignPath Foundation](https://signpath.org/)."
+          ) | Set-Content "release/release-notes.md" -Encoding UTF8
+
+      - name: Package Windows release archive and SHA256SUMS
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.meta.outputs.tag }}"
+          $pkgDir = "release/TopiQTT-$tag-windows-x64"
+          $zipPath = "release/TopiQTT-$tag-windows-x64.zip"
+          New-Item -ItemType Directory -Force -Path $pkgDir | Out-Null
+
+          Copy-Item "signed/TopiQTT.exe" "$pkgDir/TopiQTT.exe" -Force
+          Copy-Item "README.md" "$pkgDir/README.md" -Force
+          Copy-Item "LICENSE" "$pkgDir/LICENSE" -Force
+          Copy-Item "PRIVACY.md" "$pkgDir/PRIVACY.md" -Force
+
+          Compress-Archive -Path "$pkgDir/*" -DestinationPath $zipPath -Force
+
+          $hExe = (Get-FileHash "$pkgDir/TopiQTT.exe" -Algorithm SHA256).Hash
+          $hZip = (Get-FileHash $zipPath -Algorithm SHA256).Hash
+          "$hExe  TopiQTT.exe`r`n$hZip  TopiQTT-$tag-windows-x64.zip" | Set-Content "release/SHA256SUMS.txt" -Encoding UTF8
+
+      - name: Generate GitHub build provenance attestation
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            signed/TopiQTT.exe
+            release/TopiQTT-${{ steps.meta.outputs.tag }}-windows-x64.zip
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: "TopiQTT ${{ steps.meta.outputs.tag }}"
+          body_path: release/release-notes.md
+          generate_release_notes: true
+          files: |
+            signed/TopiQTT.exe
+            release/TopiQTT-${{ steps.meta.outputs.tag }}-windows-x64.zip
+            release/SHA256SUMS.txt

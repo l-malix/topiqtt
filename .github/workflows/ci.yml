@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-and-build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Run unit tests
+        run: go test -count=1 -v ./...
+
+      - name: Generate Windows resources (icon, manifest, version)
+        run: go run github.com/tc-hib/go-winres@v0.3.3 make --arch amd64
+
+      - name: Build TopiQTT.exe (unsigned verification build)
+        env:
+          CGO_ENABLED: "0"
+        run: go build -ldflags="-H windowsgui -s -w" -o TopiQTT.exe .
