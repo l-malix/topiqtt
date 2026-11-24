@@ -25,7 +25,7 @@
     activeTab: 'readable',
     publishOpen: false,
     publishMode: 'json',
-    publishHeight: 230,
+    publishHeight: 260,
     sidebarWidth: 380,
     pendingConfirm: null,
     editingProfile: null,
@@ -600,12 +600,212 @@
     return String(v);
   }
 
+  function highlightJsonLine(line) {
+    if (!line) return '';
+    const tokenRe = /"((?:\\.|[^"\\])*)"(\s*:)?|"((?:\\.|[^"\\])*)|(-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(?:true|false|null)\b|[{}\[\],:]/g;
+    let out = '';
+    let lastIdx = 0;
+    let match;
+    while ((match = tokenRe.exec(line)) !== null) {
+      if (match.index > lastIdx) {
+        out += escapeHtml(line.slice(lastIdx, match.index));
+      }
+      const rawTok = match[0];
+      if (match[1] !== undefined) {
+        if (match[2] !== undefined) {
+          out += `<span class="tok-key">"${escapeHtml(match[1])}"</span>${escapeHtml(match[2].slice(0, -1))}<span class="tok-punct">:</span>`;
+        } else {
+          out += `<span class="tok-str">${escapeHtml(rawTok)}</span>`;
+        }
+      } else if (match[3] !== undefined) {
+        out += `<span class="tok-str">${escapeHtml(rawTok)}</span>`;
+      } else if (match[4] !== undefined) {
+        const prevCh = match.index > 0 ? line[match.index - 1] : '';
+        const nextCh = line[tokenRe.lastIndex] || '';
+        if (/[\w.]/.test(prevCh) || /[\w.]/.test(nextCh)) {
+          out += escapeHtml(rawTok);
+        } else {
+          out += `<span class="tok-num">${escapeHtml(rawTok)}</span>`;
+        }
+      } else if (rawTok === 'true' || rawTok === 'false' || rawTok === 'null') {
+        out += `<span class="tok-bool">${rawTok}</span>`;
+      } else {
+        out += `<span class="tok-punct">${escapeHtml(rawTok)}</span>`;
+      }
+      lastIdx = tokenRe.lastIndex;
+    }
+    if (lastIdx < line.length) {
+      out += escapeHtml(line.slice(lastIdx));
+    }
+    return out;
+  }
+
+  function highlightJsonText(text) {
+    return text.split('\n').map(highlightJsonLine).join('\n');
+  }
+
+  function getJsonErrorInfo(text, err) {
+    const msg = err && err.message ? err.message : 'Erreur de syntaxe JSON';
+    let line = 1;
+    let col = 1;
+    const lcMatch = /line\s+(\d+)\s+column\s+(\d+)/i.exec(msg);
+    if (lcMatch) {
+      line = Math.max(1, Number(lcMatch[1]));
+      col = Math.max(1, Number(lcMatch[2]));
+    } else {
+      const posMatch = /position\s+(\d+)/i.exec(msg);
+      let pos = posMatch ? Math.min(text.length, Number(posMatch[1])) : text.length;
+      const before = text.slice(0, pos);
+      const parts = before.split('\n');
+      line = parts.length;
+      col = parts[parts.length - 1].length + 1;
+    }
+    return { line, col, message: msg };
+  }
+
+  function getOffsetFromLineCol(text, line, col) {
+    const lines = text.split('\n');
+    const targetLine = Math.max(1, Math.min(lines.length, line));
+    let offset = 0;
+    for (let i = 0; i < targetLine - 1; i++) {
+      offset += lines[i].length + 1;
+    }
+    const maxCol = lines[targetLine - 1].length;
+    return offset + Math.max(0, Math.min(maxCol, col - 1));
+  }
+
+  let lastPublishJsonError = null;
+
+  function syncPublishEditor() {
+    const textarea = document.getElementById('pub-payload');
+    const highlight = document.getElementById('pub-highlight');
+    const gutter = document.getElementById('pub-gutter');
+    const shell = document.getElementById('pub-editor-shell');
+    const pill = document.getElementById('pub-json-status');
+    const dot = document.getElementById('pub-json-dot');
+    const statusText = document.getElementById('pub-json-status-text');
+    const fmtBtn = document.getElementById('btn-pub-format');
+    const minBtn = document.getElementById('btn-pub-minify');
+    if (!textarea || !highlight || !gutter) return;
+
+    const val = textarea.value;
+    const isJson = state.publishMode === 'json';
+    const trimmed = val.trim();
+    let errInfo = null;
+
+    if (isJson && trimmed !== '') {
+      try {
+        JSON.parse(trimmed);
+      } catch (err) {
+        errInfo = getJsonErrorInfo(val, err);
+      }
+    }
+    lastPublishJsonError = errInfo;
+
+    const lines = val.split('\n');
+    const errLine = errInfo ? errInfo.line : 0;
+
+    gutter.innerHTML = lines.map((_, idx) => {
+      const n = idx + 1;
+      return `<span class="pub-gutter-line${n === errLine ? ' is-error' : ''}">${n}</span>`;
+    }).join('');
+
+    highlight.innerHTML = lines.map((line, idx) => {
+      const content = isJson ? highlightJsonLine(line) : escapeHtml(line);
+      return `<span class="pub-line${idx + 1 === errLine ? ' is-error' : ''}">${content || ' '}</span>`;
+    }).join('');
+
+    highlight.scrollTop = textarea.scrollTop;
+    highlight.scrollLeft = textarea.scrollLeft;
+    gutter.scrollTop = textarea.scrollTop;
+
+    shell.classList.toggle('has-error', Boolean(errInfo));
+    fmtBtn.classList.toggle('hidden', !isJson);
+    minBtn.classList.toggle('hidden', !isJson);
+
+    if (!isJson) {
+      pill.className = 'json-status-pill';
+      dot.style.background = 'var(--muted-foreground)';
+      statusText.textContent = `Texte · ${lines.length} l · ${val.length} car.`;
+    } else if (!trimmed) {
+      pill.className = 'json-status-pill';
+      dot.style.background = 'var(--muted-foreground)';
+      statusText.textContent = 'JSON · prêt';
+    } else if (errInfo) {
+      pill.className = 'json-status-pill is-error';
+      dot.style.background = 'var(--error)';
+      statusText.textContent = `Erreur L${errInfo.line}:C${errInfo.col}`;
+    } else {
+      pill.className = 'json-status-pill is-valid';
+      dot.style.background = 'var(--success)';
+      statusText.textContent = `JSON valide · ${lines.length} l · ${val.length} o`;
+    }
+  }
+
+  function setPublishPayload(text) {
+    const textarea = document.getElementById('pub-payload');
+    textarea.value = text;
+    syncPublishEditor();
+  }
+
+  function formatJsonErrorDetail(text, err) {
+    const info = getJsonErrorInfo(text, err);
+    return `Syntaxe JSON invalide (ligne ${info.line}, colonne ${info.col}) : ${info.message}`;
+  }
+
+  function jumpToPublishError() {
+    if (!lastPublishJsonError) return;
+    const textarea = document.getElementById('pub-payload');
+    const errEl = document.getElementById('pub-error');
+    const offset = getOffsetFromLineCol(textarea.value, lastPublishJsonError.line, lastPublishJsonError.col);
+    textarea.focus();
+    textarea.setSelectionRange(offset, offset);
+    errEl.textContent = `Syntaxe JSON invalide (ligne ${lastPublishJsonError.line}, colonne ${lastPublishJsonError.col}) : ${lastPublishJsonError.message}`;
+    errEl.classList.remove('hidden');
+  }
+
+  function formatPublishJson(minify) {
+    const textarea = document.getElementById('pub-payload');
+    const errEl = document.getElementById('pub-error');
+    errEl.classList.add('hidden');
+    const raw = textarea.value.trim();
+    if (!raw) {
+      if (minify) {
+        setPublishPayload('{}');
+        textarea.focus();
+        textarea.setSelectionRange(1, 1);
+      } else {
+        setPublishPayload('{\n  \n}');
+        textarea.focus();
+        textarea.setSelectionRange(4, 4);
+      }
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw);
+      const next = minify ? JSON.stringify(parsed) : JSON.stringify(parsed, null, 2);
+      setPublishPayload(next);
+      textarea.focus();
+    } catch (err) {
+      syncPublishEditor();
+      errEl.textContent = formatJsonErrorDetail(textarea.value, err);
+      errEl.classList.remove('hidden');
+      if (lastPublishJsonError) {
+        const offset = getOffsetFromLineCol(textarea.value, lastPublishJsonError.line, lastPublishJsonError.col);
+        textarea.focus();
+        textarea.setSelectionRange(offset, offset);
+      }
+    }
+  }
+
   function renderJsonView(item) {
     document.getElementById('json-format-label').textContent = `Format : ${getPayloadKindLabel(item.payload)}`;
-    document.getElementById('json-pre').textContent =
-      typeof item.payload === 'object' && item.payload !== null
-        ? JSON.stringify(item.payload, null, 2)
-        : (item.raw ?? String(item.payload));
+    const pre = document.getElementById('json-pre');
+    if (typeof item.payload === 'object' && item.payload !== null) {
+      pre.innerHTML = highlightJsonText(JSON.stringify(item.payload, null, 2));
+    } else {
+      pre.textContent = item.raw ?? String(item.payload);
+    }
   }
 
   function renderDiffView(item) {
@@ -864,10 +1064,11 @@
 
     if (!state.publishOpen) {
       document.getElementById('pub-topic-input').value = state.selectedPath;
-      document.getElementById('pub-payload').value =
+      setPublishPayload(
         typeof item.payload === 'object' && item.payload !== null
           ? JSON.stringify(item.payload, null, 2)
-          : (item.raw ?? String(item.payload));
+          : (item.raw ?? String(item.payload))
+      );
     }
 
     ['readable', 'json', 'diff', 'chart'].forEach((id) => {
@@ -906,7 +1107,8 @@
     document.getElementById('publish-form').classList.toggle('hidden', !open);
     document.getElementById('btn-toggle-publish').setAttribute('aria-expanded', String(open));
     document.getElementById('publish-chevron').textContent = open ? 'Réduire' : 'Ouvrir';
-    drawer.style.height = open ? `${state.publishHeight || 230}px` : '';
+    drawer.style.height = open ? `${state.publishHeight || 260}px` : '';
+    if (open) syncPublishEditor();
     if (state.activeTab === 'chart') requestAnimationFrame(drawTopicChart);
     if (persist) savePrefs();
   }
@@ -914,7 +1116,7 @@
   function openPublishDrawer(topicPath, payloadText) {
     setPublishDrawerOpen(true);
     if (topicPath) document.getElementById('pub-topic-input').value = topicPath;
-    if (payloadText !== undefined) document.getElementById('pub-payload').value = payloadText;
+    if (payloadText !== undefined) setPublishPayload(payloadText);
   }
 
   // ---- Dashboards & Multi-Curve Charts ----
@@ -1721,8 +1923,156 @@
         b.setAttribute('aria-pressed', String(active));
       });
       document.getElementById('pub-error').classList.add('hidden');
+      syncPublishEditor();
     });
   });
+
+  document.getElementById('btn-pub-format').addEventListener('click', () => formatPublishJson(false));
+  document.getElementById('btn-pub-minify').addEventListener('click', () => formatPublishJson(true));
+  document.getElementById('btn-pub-clear').addEventListener('click', () => {
+    document.getElementById('pub-error').classList.add('hidden');
+    setPublishPayload('');
+    document.getElementById('pub-payload').focus();
+  });
+  document.getElementById('pub-json-status').addEventListener('click', jumpToPublishError);
+
+  (function initPublishCodeEditor() {
+    const textarea = document.getElementById('pub-payload');
+    const highlight = document.getElementById('pub-highlight');
+    const gutter = document.getElementById('pub-gutter');
+    const form = document.getElementById('publish-form');
+
+    function replaceSelection(text, selOffset) {
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      textarea.setRangeText(text, start, end, 'end');
+      if (typeof selOffset === 'number') {
+        const pos = start + selOffset;
+        textarea.setSelectionRange(pos, pos);
+      }
+      syncPublishEditor();
+    }
+
+    textarea.addEventListener('input', () => {
+      document.getElementById('pub-error').classList.add('hidden');
+      syncPublishEditor();
+    });
+
+    textarea.addEventListener('scroll', () => {
+      highlight.scrollTop = textarea.scrollTop;
+      highlight.scrollLeft = textarea.scrollLeft;
+      gutter.scrollTop = textarea.scrollTop;
+    });
+
+    textarea.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        form.requestSubmit();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'f') {
+        if (state.publishMode === 'json') {
+          e.preventDefault();
+          formatPublishJson(false);
+        }
+        return;
+      }
+
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const val = textarea.value;
+
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        if (start === end && !e.shiftKey) {
+          replaceSelection('  ', 2);
+          return;
+        }
+        const lineStart = val.lastIndexOf('\n', start - 1) + 1;
+        const lineEndRaw = val.indexOf('\n', end);
+        const lineEnd = lineEndRaw === -1 ? val.length : lineEndRaw;
+        const block = val.slice(lineStart, lineEnd);
+        const blockLines = block.split('\n');
+        let nextBlock;
+        let deltaFirst = 0;
+        let deltaTotal = 0;
+        if (e.shiftKey) {
+          nextBlock = blockLines.map((ln, idx) => {
+            const removed = ln.startsWith('  ') ? 2 : (ln.startsWith(' ') ? 1 : 0);
+            if (idx === 0) deltaFirst = -removed;
+            deltaTotal -= removed;
+            return ln.slice(removed);
+          }).join('\n');
+        } else {
+          nextBlock = blockLines.map((ln, idx) => {
+            if (idx === 0) deltaFirst = 2;
+            deltaTotal += 2;
+            return '  ' + ln;
+          }).join('\n');
+        }
+        textarea.setRangeText(nextBlock, lineStart, lineEnd, 'preserve');
+        textarea.setSelectionRange(Math.max(lineStart, start + deltaFirst), Math.max(lineStart, end + deltaTotal));
+        syncPublishEditor();
+        return;
+      }
+
+      if (state.publishMode !== 'json' || e.ctrlKey || e.metaKey || e.altKey) return;
+
+      if (e.key === 'Enter' && start === end) {
+        e.preventDefault();
+        const lineStart = val.lastIndexOf('\n', start - 1) + 1;
+        const curLine = val.slice(lineStart, start);
+        const indentMatch = /^ */.exec(curLine);
+        const baseIndent = indentMatch ? indentMatch[0] : '';
+        const prevChar = start > 0 ? val[start - 1] : '';
+        const nextChar = val[start] || '';
+        if ((prevChar === '{' && nextChar === '}') || (prevChar === '[' && nextChar === ']')) {
+          const inner = `\n${baseIndent}  \n${baseIndent}`;
+          replaceSelection(inner, baseIndent.length + 3);
+        } else if (prevChar === '{' || prevChar === '[') {
+          const next = `\n${baseIndent}  `;
+          replaceSelection(next, next.length);
+        } else {
+          const next = `\n${baseIndent}`;
+          replaceSelection(next, next.length);
+        }
+        return;
+      }
+
+      const pairs = { '{': '}', '[': ']', '"': '"' };
+      if (pairs[e.key] && start === end) {
+        const nextChar = val[start] || '';
+        const prevChar = start > 0 ? val[start - 1] : '';
+        if (e.key === '"' && nextChar === '"' && prevChar !== '\\') {
+          e.preventDefault();
+          textarea.setSelectionRange(start + 1, start + 1);
+          return;
+        }
+        if (nextChar === '' || /[\s,}\]]/.test(nextChar)) {
+          e.preventDefault();
+          replaceSelection(e.key + pairs[e.key], 1);
+        }
+        return;
+      }
+
+      if ((e.key === '}' || e.key === ']') && start === end && val[start] === e.key) {
+        e.preventDefault();
+        textarea.setSelectionRange(start + 1, start + 1);
+        return;
+      }
+
+      if (e.key === 'Backspace' && start === end && start > 0) {
+        const pair = val.slice(start - 1, start + 1);
+        if (pair === '{}' || pair === '[]' || pair === '""') {
+          e.preventDefault();
+          textarea.setRangeText('', start - 1, start + 1, 'end');
+          syncPublishEditor();
+        }
+      }
+    });
+
+    syncPublishEditor();
+  })();
 
   document.getElementById('publish-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1744,8 +2094,9 @@
       return;
     }
     if (state.publishMode === 'json') {
-      try { JSON.parse(raw); } catch {
-        errEl.textContent = 'Ce JSON contient une erreur de syntaxe (vérifiez les guillemets ou accolades).';
+      try { JSON.parse(raw); } catch (err) {
+        syncPublishEditor();
+        errEl.textContent = formatJsonErrorDetail(document.getElementById('pub-payload').value, err);
         errEl.classList.remove('hidden');
         return;
       }

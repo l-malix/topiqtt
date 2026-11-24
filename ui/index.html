@@ -226,17 +226,27 @@
           <form id="publish-form" class="publish-form hidden">
             <div style="display:flex;align-items:center;gap:8px;">
               <label for="pub-topic-input" style="color:var(--muted-foreground);font-size:12px;">Topic :</label>
-              <input id="pub-topic-input" type="text" class="input mono" style="flex:1;" autocomplete="off" spellcheck="false" placeholder="ex : orders/eu/created…" />
+              <input id="pub-topic-input" type="text" class="input mono" style="flex:1;min-width:0;" autocomplete="off" spellcheck="false" placeholder="ex : orders/eu/created…" />
+              <button type="submit" class="btn btn-primary" style="padding:6px 14px;" title="Publier le message (Ctrl+Entrée)">Publier</button>
             </div>
 
             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;">
-              <div class="segmented" role="group" aria-label="Format du payload">
-                <button type="button" data-pub-mode="json" class="segmented-btn active pub-mode-btn" aria-pressed="true">JSON</button>
-                <button type="button" data-pub-mode="text" class="segmented-btn pub-mode-btn" aria-pressed="false">Texte brut</button>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <div class="segmented" role="group" aria-label="Format du payload">
+                  <button type="button" data-pub-mode="json" class="segmented-btn active pub-mode-btn" aria-pressed="true">JSON</button>
+                  <button type="button" data-pub-mode="text" class="segmented-btn pub-mode-btn" aria-pressed="false">Texte brut</button>
+                </div>
+                <button id="pub-json-status" type="button" class="json-status-pill" title="État du JSON">
+                  <span id="pub-json-dot" class="dot" style="width:6px;height:6px;background:var(--muted-foreground);" aria-hidden="true"></span>
+                  <span id="pub-json-status-text">JSON · prêt</span>
+                </button>
               </div>
-              <button id="btn-toggle-pub-adv" type="button" aria-expanded="false" style="color:var(--muted-foreground);font-size:12px;text-decoration:underline;">
-                Options techniques (QoS et Retain)
-              </button>
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                <button id="btn-pub-format" type="button" class="btn btn-sm" title="Formater et indenter le JSON (Ctrl+Maj+F)">Formater</button>
+                <button id="btn-pub-minify" type="button" class="btn btn-sm" title="Compacter le JSON sur une ligne">Compacter</button>
+                <button id="btn-pub-clear" type="button" class="btn btn-ghost btn-sm" title="Vider l'éditeur">Effacer</button>
+                <button id="btn-toggle-pub-adv" type="button" class="btn btn-ghost btn-sm" aria-expanded="false">QoS &amp; Retain</button>
+              </div>
             </div>
 
             <div id="pub-adv-options" class="hidden" style="display:flex;align-items:center;gap:16px;padding:8px 10px;border-radius:8px;background:var(--content);border:1px solid var(--border);flex-wrap:wrap;">
@@ -254,10 +264,13 @@
               </label>
             </div>
 
-            <div class="pub-row-editor">
-              <label for="pub-payload" class="sr-only">Payload à publier</label>
-              <textarea id="pub-payload" class="textarea mono" spellcheck="false" placeholder='{"status": "ok"}'></textarea>
-              <button type="submit" class="btn btn-primary" style="padding:8px 16px;">Publier</button>
+            <div id="pub-editor-shell" class="pub-editor-shell">
+              <div id="pub-gutter" class="pub-gutter mono tabular" aria-hidden="true">1</div>
+              <div class="pub-code-stage">
+                <pre id="pub-highlight" class="pub-highlight" aria-hidden="true"></pre>
+                <label for="pub-payload" class="sr-only">Payload à publier</label>
+                <textarea id="pub-payload" class="pub-textarea" spellcheck="false" wrap="off" placeholder='{"status": "ok"}'></textarea>
+              </div>
             </div>
             <p id="pub-error" class="hidden" style="margin:0;color:var(--error);font-size:12px;" role="alert"></p>
           </form>

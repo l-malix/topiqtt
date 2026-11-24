@@ -95,7 +95,7 @@ func defaultPersistedState() PersistedState {
 		Prefs: UIPrefs{
 			Theme:         "auto",
 			SidebarWidth:  360,
-			PublishHeight: 230,
+			PublishHeight: 260,
 			PublishOpen:   false,
 		},
 	}
