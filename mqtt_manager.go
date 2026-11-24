@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"os"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -206,6 +209,88 @@ var preferredMetricOrder = []string{
 	"processedCount", "heapUsedMb", "amount", "percent", "value",
 }
 
+var numericStringRe = regexp.MustCompile(`^[+-]?(?:\d+(?:[.,]\d+)?|[.,]\d+)(?:[eE][+-]?\d+)?$`)
+
+func parseNumericString(s string) (float64, bool) {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" || !numericStringRe.MatchString(trimmed) {
+		return 0, false
+	}
+	normalized := strings.ReplaceAll(trimmed, ",", ".")
+	val, err := strconv.ParseFloat(normalized, 64)
+	if err != nil || math.IsNaN(val) || math.IsInf(val, 0) {
+		return 0, false
+	}
+	return val, true
+}
+
+func isFiniteFloat(v interface{}) bool {
+	f, ok := v.(float64)
+	return ok && !math.IsNaN(f) && !math.IsInf(f, 0)
+}
+
+func isNumericScalarValue(v interface{}, allowStrings bool) bool {
+	if isFiniteFloat(v) {
+		return true
+	}
+	if allowStrings {
+		if s, ok := v.(string); ok {
+			_, numOK := parseNumericString(s)
+			return numOK
+		}
+	}
+	return false
+}
+
+func findNumericFieldInMap(m map[string]interface{}, allowStrings bool) string {
+	for _, pref := range preferredMetricOrder {
+		if val, exists := m[pref]; exists && isNumericScalarValue(val, allowStrings) {
+			return pref
+		}
+	}
+	keys := make([]string, 0, len(m))
+	for k, val := range m {
+		if isNumericScalarValue(val, allowStrings) && !isTimestampField(k) {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	if len(keys) > 0 {
+		return keys[0]
+	}
+	return ""
+}
+
+func findNestedNumericPath(m map[string]interface{}, prefix string, depth int, allowStrings bool) string {
+	if depth > 4 {
+		return ""
+	}
+	if found := findNumericFieldInMap(m, allowStrings); found != "" {
+		if prefix == "" {
+			return found
+		}
+		return prefix + "." + found
+	}
+	keys := make([]string, 0, len(m))
+	for k, val := range m {
+		if _, isMap := val.(map[string]interface{}); isMap {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		sub := m[k].(map[string]interface{})
+		nextPrefix := k
+		if prefix != "" {
+			nextPrefix = prefix + "." + k
+		}
+		if found := findNestedNumericPath(sub, nextPrefix, depth+1, allowStrings); found != "" {
+			return found
+		}
+	}
+	return ""
+}
+
 func parsePayloadValue(raw string) (interface{}, string) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -215,29 +300,29 @@ func parsePayloadValue(raw string) (interface{}, string) {
 	if err := json.Unmarshal([]byte(trimmed), &parsed); err == nil {
 		switch v := parsed.(type) {
 		case float64:
-			return v, "__scalar__"
+			if !math.IsNaN(v) && !math.IsInf(v, 0) {
+				return v, "__scalar__"
+			}
+			return v, ""
+		case string:
+			if _, ok := parseNumericString(v); ok {
+				return v, "__scalar__"
+			}
+			return v, ""
 		case map[string]interface{}:
-			for _, pref := range preferredMetricOrder {
-				if val, exists := v[pref]; exists {
-					if _, ok := val.(float64); ok {
-						return v, pref
-					}
-				}
+			if path := findNestedNumericPath(v, "", 0, false); path != "" {
+				return v, path
 			}
-			keys := make([]string, 0, len(v))
-			for k, val := range v {
-				if _, ok := val.(float64); ok && !isTimestampField(k) {
-					keys = append(keys, k)
-				}
-			}
-			sort.Strings(keys)
-			if len(keys) > 0 {
-				return v, keys[0]
+			if path := findNestedNumericPath(v, "", 0, true); path != "" {
+				return v, path
 			}
 			return v, ""
 		default:
 			return v, ""
 		}
+	}
+	if _, ok := parseNumericString(trimmed); ok {
+		return raw, "__scalar__"
 	}
 	return raw, ""
 }

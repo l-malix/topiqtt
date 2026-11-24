@@ -252,3 +252,32 @@ func TestBuildTLSConfigAndWin32Struct(t *testing.T) {
 		t.Fatalf("unexpected TLS config: %+v", cfg)
 	}
 }
+
+func TestParseNumericStringsAndNestedObjects(t *testing.T) {
+	for _, valid := range []string{"23.5", " 23,5 ", "-12.0", "+42", "1.5e2"} {
+		if _, ok := parseNumericString(valid); !ok {
+			t.Fatalf("expected %q to parse as numeric string", valid)
+		}
+	}
+	for _, invalid := range []string{"", "ok", "2026-11-24", "192.168.1.1", "v0.1.0", "NaN", "Infinity"} {
+		if _, ok := parseNumericString(invalid); ok {
+			t.Fatalf("did not expect %q to parse as numeric string", invalid)
+		}
+	}
+
+	if _, key := parsePayloadValue(`"23.5"`); key != "__scalar__" {
+		t.Fatalf("expected __scalar__ for JSON quoted numeric string, got %q", key)
+	}
+	if _, key := parsePayloadValue(`23,5`); key != "__scalar__" {
+		t.Fatalf("expected __scalar__ for comma decimal scalar string, got %q", key)
+	}
+	if _, key := parsePayloadValue(`{"temp": "24.8", "status": "ok"}`); key != "temp" {
+		t.Fatalf("expected temp for string field in JSON object, got %q", key)
+	}
+	if _, key := parsePayloadValue(`{"sensor": {"humidity": "61,2"}}`); key != "sensor.humidity" {
+		t.Fatalf("expected sensor.humidity for nested string field, got %q", key)
+	}
+	if _, key := parsePayloadValue(`{"date": "2026-11-24", "ip": "10.0.0.1"}`); key != "" {
+		t.Fatalf("expected empty numericKey for non-numeric strings, got %q", key)
+	}
+}

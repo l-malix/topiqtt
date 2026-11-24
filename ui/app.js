@@ -703,11 +703,14 @@
     titleEl.textContent = `Évolution de « ${keyName} »`;
 
     const points = (item.history || [])
-      .map((h) => ({
-        ts: h.ts,
-        val: item.numericKey === '__scalar__' ? h.payload : (h.payload && h.payload[item.numericKey])
-      }))
-      .filter((pt) => typeof pt.val === 'number');
+      .map((h) => {
+        const rawVal = item.numericKey === '__scalar__' ? h.payload : getValueByPath(h.payload, item.numericKey);
+        return {
+          ts: h.ts,
+          val: parseNumericValue(rawVal)
+        };
+      })
+      .filter((pt) => pt.val !== null);
 
     if (points.length === 0) return;
     latestEl.textContent = formatNumber(points[points.length - 1].val);
@@ -915,13 +918,61 @@
   }
 
   // ---- Dashboards & Multi-Curve Charts ----
+  const NUMERIC_STR_RE = /^[+-]?(?:\d+(?:[.,]\d+)?|[.,]\d+)(?:[eE][+-]?\d+)?$/;
+
+  function parseNumericValue(v) {
+    if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+    if (typeof v === 'string') {
+      const trimmed = v.trim();
+      if (!trimmed || !NUMERIC_STR_RE.test(trimmed)) return null;
+      const parsed = Number(trimmed.replace(',', '.'));
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  }
+
+  function getValueByPath(obj, path) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj) || !path) return undefined;
+    if (Object.prototype.hasOwnProperty.call(obj, path)) return obj[path];
+    const parts = path.split('.');
+    let cur = obj;
+    for (let i = 0; i < parts.length; i++) {
+      if (!cur || typeof cur !== 'object' || Array.isArray(cur)) return undefined;
+      if (!Object.prototype.hasOwnProperty.call(cur, parts[i])) return undefined;
+      cur = cur[parts[i]];
+    }
+    return cur;
+  }
+
+  function collectNumericFields(obj, prefix, depth, out) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj) || depth > 4) return;
+    Object.entries(obj).forEach(([k, v]) => {
+      const fullPath = prefix ? `${prefix}.${k}` : k;
+      if (parseNumericValue(v) !== null) {
+        out.push({
+          key: fullPath,
+          label: typeof v === 'string' ? `${fullPath} (texte)` : fullPath
+        });
+      } else if (v && typeof v === 'object' && !Array.isArray(v)) {
+        collectNumericFields(v, fullPath, depth + 1, out);
+      }
+    });
+  }
+
   function getNumericFieldsForTopic(topicKey) {
     const item = state.topics[topicKey];
     if (!item) return [];
     const p = item.payload;
-    if (typeof p === 'number') return [{ key: '__scalar__', label: 'Valeur numérique directe' }];
+    if (parseNumericValue(p) !== null) {
+      return [{
+        key: '__scalar__',
+        label: typeof p === 'string' ? 'Valeur numérique (texte)' : 'Valeur numérique directe'
+      }];
+    }
     if (p && typeof p === 'object' && !Array.isArray(p)) {
-      return Object.entries(p).filter(([, v]) => typeof v === 'number').map(([k]) => ({ key: k, label: k }));
+      const fields = [];
+      collectNumericFields(p, '', 0, fields);
+      return fields;
     }
     return [];
   }
@@ -934,13 +985,16 @@
     const item = state.topics[seriesCfg.topic];
     if (!item || !Array.isArray(item.history)) return [];
     return item.history
-      .map((h) => ({
-        ts: h.ts,
-        val: seriesCfg.field === '__scalar__'
+      .map((h) => {
+        const rawVal = seriesCfg.field === '__scalar__'
           ? h.payload
-          : (h.payload && typeof h.payload === 'object' ? h.payload[seriesCfg.field] : undefined)
-      }))
-      .filter((pt) => typeof pt.val === 'number');
+          : getValueByPath(h.payload, seriesCfg.field);
+        return {
+          ts: h.ts,
+          val: parseNumericValue(rawVal)
+        };
+      })
+      .filter((pt) => pt.val !== null);
   }
 
   function drawDashboardChart(chart, canvas, hoverRatio) {
