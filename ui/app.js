@@ -158,21 +158,34 @@
 
   function getInlinePreview(item) {
     const p = item.payload;
+    if (p === null) return 'null';
     if (typeof p === 'number') return formatNumber(p);
     if (typeof p === 'string' || typeof p === 'boolean') return String(p);
-    if (p && typeof p === 'object') {
-      const vals = Object.values(p).slice(0, 2).map((v) => (typeof v === 'number' ? formatNumber(v) : String(v)));
-      return vals.join(' · ') || '{…}';
+    if (Array.isArray(p)) return p.length === 0 ? '[]' : `[${p.length} élém.]`;
+    if (typeof p === 'object') {
+      const vals = Object.values(p).slice(0, 2).map((v) => {
+        if (v === null) return 'null';
+        if (typeof v === 'number') return formatNumber(v);
+        if (typeof v === 'object') return Array.isArray(v) ? `[${v.length}]` : '{…}';
+        return String(v);
+      });
+      return vals.join(' · ') || '{}';
     }
     return 'vide';
   }
 
   function getPayloadKindLabel(payload) {
+    if (payload === null) return 'Null';
     if (typeof payload === 'number') return 'Nombre';
     if (typeof payload === 'string') return 'Texte';
     if (typeof payload === 'boolean') return 'Booléen';
-    if (Array.isArray(payload)) return 'Liste JSON';
-    if (payload && typeof payload === 'object') return 'Objet JSON';
+    if (Array.isArray(payload)) {
+      if (payload.length > 0 && payload.every((el) => el && typeof el === 'object' && !Array.isArray(el))) {
+        return 'Liste d’objets JSON';
+      }
+      return 'Liste JSON';
+    }
+    if (typeof payload === 'object') return 'Objet JSON';
     return 'Donnée';
   }
 
@@ -405,6 +418,55 @@
       .join('');
   }
 
+  function getValueTypeLabel(v) {
+    if (v === null) return 'Null';
+    if (v === undefined) return 'Absent';
+    if (Array.isArray(v)) return `Liste (${v.length})`;
+    if (typeof v === 'object') return 'Objet JSON';
+    if (typeof v === 'number') return 'Nombre';
+    if (typeof v === 'boolean') return 'Booléen';
+    return 'Texte';
+  }
+
+  function formatReadableCellHtml(v, compactObject) {
+    if (v === undefined) return '<span style="color:var(--muted-foreground);">—</span>';
+    if (v === null) return '<span class="mono" style="color:var(--muted-foreground);">null</span>';
+    if (typeof v === 'number') return `<span class="tabular" style="font-weight:500;">${escapeHtml(formatNumber(v))}</span>`;
+    if (typeof v === 'boolean') return `<span class="mono" style="font-weight:500;">${v ? 'true' : 'false'}</span>`;
+    if (typeof v === 'object') {
+      const jsonText = compactObject ? JSON.stringify(v) : JSON.stringify(v, null, 2);
+      return `<pre class="mono" style="margin:0;white-space:pre-wrap;word-break:break-word;font-size:12px;">${escapeHtml(jsonText)}</pre>`;
+    }
+    return `<span style="font-weight:500;word-break:break-word;">${escapeHtml(String(v))}</span>`;
+  }
+
+  function renderObjectKeyValueTable(obj) {
+    const entries = Object.entries(obj);
+    if (entries.length === 0) {
+      return '<div style="padding:14px;color:var(--muted-foreground);">Objet JSON vide ({})</div>';
+    }
+    return `
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Clé</th>
+            <th>Valeur</th>
+            <th style="text-align:right;">Type</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${entries.map(([k, v]) => `
+            <tr>
+              <td class="mono" style="color:var(--muted-foreground);vertical-align:top;" translate="no">${escapeHtml(k)}</td>
+              <td style="vertical-align:top;">${formatReadableCellHtml(v, false)}</td>
+              <td style="text-align:right;color:var(--muted-foreground);white-space:nowrap;vertical-align:top;">${getValueTypeLabel(v)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+  }
+
   function renderReadableView(item) {
     const container = document.getElementById('readable-container');
     const p = item.payload;
@@ -415,31 +477,112 @@
           <span>Champs détectés (${entries.length})</span>
           <span>Format : ${getPayloadKindLabel(p)}</span>
         </div>
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Clé</th>
-              <th>Valeur</th>
-              <th style="text-align:right;">Type</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${entries.map(([k, v]) => {
-              const typeName = typeof v === 'number' ? 'Nombre' : typeof v === 'boolean' ? 'Booléen' : 'Texte';
-              const valStr = typeof v === 'number' ? formatNumber(v) : String(v);
-              return `
+        <div style="overflow-x:auto;">
+          ${renderObjectKeyValueTable(p)}
+        </div>
+      `;
+    } else if (Array.isArray(p)) {
+      if (p.length === 0) {
+        container.innerHTML = `
+          <div class="card-header-bar">
+            <span>Liste vide (0 élément)</span>
+            <span>Format : Liste JSON</span>
+          </div>
+          <div style="padding:16px;color:var(--muted-foreground);">[] (aucun élément dans cette liste)</div>
+        `;
+        return;
+      }
+
+      const allObjects = p.every((el) => el && typeof el === 'object' && !Array.isArray(el));
+      if (allObjects) {
+        const cols = [];
+        const seenCols = new Set();
+        p.forEach((row) => {
+          Object.keys(row).forEach((k) => {
+            if (!seenCols.has(k)) {
+              seenCols.add(k);
+              cols.push(k);
+            }
+          });
+        });
+
+        if (cols.length > 0 && cols.length <= 7) {
+          container.innerHTML = `
+            <div class="card-header-bar">
+              <span>Éléments de la liste (${p.length})</span>
+              <span>Format : ${getPayloadKindLabel(p)}</span>
+            </div>
+            <div style="overflow-x:auto;">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th style="width:44px;">#</th>
+                    ${cols.map((c) => `<th class="mono" translate="no">${escapeHtml(c)}</th>`).join('')}
+                  </tr>
+                </thead>
+                <tbody>
+                  ${p.map((row, idx) => `
+                    <tr>
+                      <td class="tabular" style="color:var(--muted-foreground);vertical-align:top;">${idx + 1}</td>
+                      ${cols.map((c) => `<td style="vertical-align:top;">${Object.prototype.hasOwnProperty.call(row, c) ? formatReadableCellHtml(row[c], true) : '<span style="color:var(--muted-foreground);">—</span>'}</td>`).join('')}
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          `;
+        } else {
+          container.innerHTML = `
+            <div class="card-header-bar">
+              <span>Éléments de la liste (${p.length})</span>
+              <span>Format : ${getPayloadKindLabel(p)}</span>
+            </div>
+            <div style="display:flex;flex-direction:column;">
+              ${p.map((row, idx) => `
+                <div style="border-bottom:1px solid var(--card-border);">
+                  <div style="padding:7px 14px;background:color-mix(in srgb,var(--sidebar) 65%,transparent);font-size:12px;font-weight:600;color:var(--muted-foreground);display:flex;justify-content:space-between;">
+                    <span>Élément #${idx + 1}</span>
+                    <span>${Object.keys(row).length} champ${Object.keys(row).length > 1 ? 's' : ''}</span>
+                  </div>
+                  <div style="overflow-x:auto;">
+                    ${renderObjectKeyValueTable(row)}
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          `;
+        }
+        return;
+      }
+
+      container.innerHTML = `
+        <div class="card-header-bar">
+          <span>Éléments de la liste (${p.length})</span>
+          <span>Format : ${getPayloadKindLabel(p)}</span>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th style="width:48px;">#</th>
+                <th>Valeur</th>
+                <th style="text-align:right;">Type</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${p.map((el, idx) => `
                 <tr>
-                  <td class="mono" style="color:var(--muted-foreground);" translate="no">${escapeHtml(k)}</td>
-                  <td class="tabular" style="font-weight:500;word-break:break-word;">${escapeHtml(valStr)}</td>
-                  <td style="text-align:right;color:var(--muted-foreground);">${typeName}</td>
+                  <td class="tabular" style="color:var(--muted-foreground);vertical-align:top;">${idx + 1}</td>
+                  <td style="vertical-align:top;">${formatReadableCellHtml(el, false)}</td>
+                  <td style="text-align:right;color:var(--muted-foreground);white-space:nowrap;vertical-align:top;">${getValueTypeLabel(el)}</td>
                 </tr>
-              `;
-            }).join('')}
-          </tbody>
-        </table>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
       `;
     } else {
-      const formatted = typeof p === 'number' ? formatNumber(p) : String(p);
+      const formatted = p === null ? 'null' : (typeof p === 'number' ? formatNumber(p) : String(p));
       container.innerHTML = `
         <div class="card-header-bar">
           <span>Valeur reçue</span>
@@ -448,6 +591,13 @@
         <div style="padding:16px;font-size:17px;font-weight:600;word-break:break-word;" class="tabular">${escapeHtml(formatted)}</div>
       `;
     }
+  }
+
+  function formatDiffCell(v) {
+    if (v === undefined) return 'absent';
+    if (v === null) return 'null';
+    if (typeof v === 'object') return JSON.stringify(v);
+    return String(v);
   }
 
   function renderJsonView(item) {
@@ -465,7 +615,10 @@
       return;
     }
 
-    if (typeof item.payload === 'object' && typeof item.prevPayload === 'object' && item.payload !== null && item.prevPayload !== null) {
+    const currIsPlainObj = typeof item.payload === 'object' && item.payload !== null && !Array.isArray(item.payload);
+    const prevIsPlainObj = typeof item.prevPayload === 'object' && item.prevPayload !== null && !Array.isArray(item.prevPayload);
+
+    if (currIsPlainObj && prevIsPlainObj) {
       const keys = Array.from(new Set([...Object.keys(item.prevPayload), ...Object.keys(item.payload)]));
       container.innerHTML = `
         <table class="data-table">
@@ -484,8 +637,35 @@
               return `
                 <tr>
                   <td class="mono" translate="no">${escapeHtml(k)}</td>
-                  <td class="mono tabular ${changed ? 'diff-old' : ''}">${escapeHtml(prevVal ?? 'absent')}</td>
-                  <td class="mono tabular ${changed ? 'diff-new' : ''}">${escapeHtml(currVal ?? 'absent')}</td>
+                  <td class="mono tabular ${changed ? 'diff-old' : ''}" style="word-break:break-word;">${escapeHtml(formatDiffCell(prevVal))}</td>
+                  <td class="mono tabular ${changed ? 'diff-new' : ''}" style="word-break:break-word;">${escapeHtml(formatDiffCell(currVal))}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      `;
+    } else if (Array.isArray(item.payload) && Array.isArray(item.prevPayload)) {
+      const maxLen = Math.max(item.prevPayload.length, item.payload.length);
+      container.innerHTML = `
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width:48px;">#</th>
+              <th>Message précédent</th>
+              <th>Message actuel</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${Array.from({ length: maxLen }, (_, idx) => {
+              const prevVal = idx < item.prevPayload.length ? item.prevPayload[idx] : undefined;
+              const currVal = idx < item.payload.length ? item.payload[idx] : undefined;
+              const changed = JSON.stringify(prevVal) !== JSON.stringify(currVal);
+              return `
+                <tr>
+                  <td class="tabular" style="color:var(--muted-foreground);">${idx + 1}</td>
+                  <td class="mono tabular ${changed ? 'diff-old' : ''}" style="word-break:break-word;">${escapeHtml(formatDiffCell(prevVal))}</td>
+                  <td class="mono tabular ${changed ? 'diff-new' : ''}" style="word-break:break-word;">${escapeHtml(formatDiffCell(currVal))}</td>
                 </tr>
               `;
             }).join('')}
@@ -495,8 +675,8 @@
     } else {
       container.innerHTML = `
         <div style="padding:14px;display:flex;flex-direction:column;gap:8px;" class="mono">
-          <div style="padding:8px;border-radius:6px;background:color-mix(in srgb,var(--error) 12%,transparent);color:var(--error);">- ${escapeHtml(item.prevRaw || String(item.prevPayload))}</div>
-          <div style="padding:8px;border-radius:6px;background:color-mix(in srgb,var(--success) 12%,transparent);color:var(--success);">+ ${escapeHtml(item.raw || String(item.payload))}</div>
+          <div style="padding:8px;border-radius:6px;background:color-mix(in srgb,var(--error) 12%,transparent);color:var(--error);">- ${escapeHtml(item.prevRaw || formatDiffCell(item.prevPayload))}</div>
+          <div style="padding:8px;border-radius:6px;background:color-mix(in srgb,var(--success) 12%,transparent);color:var(--success);">+ ${escapeHtml(item.raw || formatDiffCell(item.payload))}</div>
         </div>
       `;
     }

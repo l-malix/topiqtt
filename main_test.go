@@ -5,11 +5,13 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 	"unsafe"
@@ -115,6 +117,29 @@ func TestBuildDesktopHTML(t *testing.T) {
 	}
 	if len(html) == 0 || len(html) > 1_500_000 {
 		t.Fatalf("unexpected html byte size: %d", len(html))
+	}
+	if !strings.Contains(html, "renderObjectKeyValueTable") {
+		t.Fatalf("expected updated readable view renderer in embedded HTML")
+	}
+}
+
+func TestIngestJSONObjectListPayload(t *testing.T) {
+	dir := t.TempDir()
+	store, err := NewStore(filepath.Join(dir, "state.json"))
+	if err != nil {
+		t.Fatalf("NewStore failed: %v", err)
+	}
+	mgr := NewMqttManager(store, nil)
+	defer mgr.Close()
+
+	mgr.ingestMessage("sensors/batch", `[{"id":"s1","temp":21.5},{"id":"s2","temp":23.0}]`, false)
+	snap := mgr.Snapshot()
+	raw, err := json.Marshal(snap.Topics["sensors/batch"].Payload)
+	if err != nil {
+		t.Fatalf("marshal payload failed: %v", err)
+	}
+	if !strings.HasPrefix(string(raw), `[{"id":"s1"`) {
+		t.Fatalf("expected JSON array of objects, got %s", string(raw))
 	}
 }
 
